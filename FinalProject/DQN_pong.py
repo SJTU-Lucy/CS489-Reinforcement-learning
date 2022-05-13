@@ -14,23 +14,20 @@ import os
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 Transition = namedtuple('Transion', ('state', 'action', 'next_state', 'reward'))
 
-# epsilon = 0.9
 BATCH_SIZE = 32
 GAMMA = 0.99
 EPS_START = 1
 EPS_END = 0.02
 EPS_DECAY = 1000000
 TARGET_UPDATE = 1000
-RENDER = False
 lr = 1e-3
 INITIAL_MEMORY = 10000
-MEMORY_SIZE = 10 * INITIAL_MEMORY
-n_episode = 2000
+MEMORY_SIZE = 100000
+n_episode = 1000
 
 MODEL_STORE_PATH = os.getcwd()
-print(MODEL_STORE_PATH)
 modelname = 'DQN_Pong'
-madel_path = MODEL_STORE_PATH + '/' + 'model/' + 'DQN_Pong_episode900.pt'
+madel_path = 'model/DQN_Pong_episode900.pt'
 
 
 class ReplayMemory(object):
@@ -53,66 +50,75 @@ class ReplayMemory(object):
 
 
 class BasicConv2d(nn.Module):
-    def __init__(self, input_dim, output_dim, kernel_size, bn):
+    def __init__(self, input_dim, output_dim, kernel_size):
         super().__init__()
         self.conv = nn.Conv2d(
             input_dim, output_dim,
             kernel_size=kernel_size,
             padding=(kernel_size[0] // 2, kernel_size[1] // 2)
         )
-        self.bn = nn.BatchNorm2d(output_dim) if bn else None
+        self.bn = nn.BatchNorm2d(output_dim)
 
     def forward(self, x):
         x = self.conv(x)
-        x = self.bn(x) if self.bn is not None else x
+        x = self.bn(x)
+        return x
+
+class BasicConv2d(nn.Module):
+    def __init__(self, input_dim, output_dim, kernel_size, stride):
+        super().__init__()
+        self.conv = nn.Conv2d(
+            input_dim, output_dim,
+            kernel_size=kernel_size,
+            padding=(kernel_size[0] // 2, kernel_size[1] // 2),
+            stride=stride
+        )
+        self.bn = nn.BatchNorm2d(output_dim)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = F.relu(x)
         return x
 
 
 class DQN(nn.Module):
     def __init__(self, in_channels=4, n_actions=14):
         super(DQN, self).__init__()
-        # (1, 3, 210, 160)
-        # o = (i + 2p - k) / s + 1
-        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=(8, 8), padding=(4, 4), stride=(1, 1))
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=(4, 4), padding=(2, 2), stride=(1, 1))
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=(3, 3), padding=(1, 1), stride=(1, 1))
-        self.fc4 = nn.Linear(7 * 7 * 64, 512)
+        # input of (1, 3, 210, 160)
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=(8, 8), stride=(4, 4))
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=(4, 4), stride=(2, 2))
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=(3, 3), stride=(2, 2))
+        self.fc4 = nn.Linear(11 * 8 * 64, 512)
         self.head = nn.Linear(512, n_actions)
-        self.conv = BasicConv2d(in_channels, 32, kernel_size=(8, 8), bn=True)
 
     def forward(self, x):
         x = x.float() / 255
-        print(x.shape)
-        x = F.relu(self.conv1(x))
-        print(x.shape)
-        x = F.relu(self.conv2(x))
-        print(x.shape)
-        x = F.relu(self.conv3(x))
-        print(x.shape)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
         x = F.relu(self.fc4(x.view(x.size(0), -1)))
         return self.head(x)
 
 
 class DQN_agent():
-    def __init__(self, in_channels=1, action_space=[], learning_rate=1e-3, memory_size=100000, epsilon=0.99):
+    def __init__(self, in_channels=1, action_space=[], learning_rate=1e-3, memory_size=100000, epsilon=EPS_START):
         self.in_channels = in_channels
         self.action_space = action_space
         self.action_dim = self.action_space.n
-
         self.memory_buffer = ReplayMemory(memory_size)
         self.stepdone = 0
         self.DQN = DQN(self.in_channels, self.action_dim).cuda()
         self.target_DQN = DQN(self.in_channels, self.action_dim).cuda()
-        # 加载之前训练好的模型
-        # self.DQN.load_state_dict(torch.load(madel_path))
-        # self.target_DQN.load_state_dict(self.DQN.state_dict())
         self.optimizer = optim.RMSprop(self.DQN.parameters(), lr=learning_rate, eps=0.001, alpha=0.95)
+        self.epsilon = epsilon
 
     def select_action(self, state):
         self.stepdone += 1
         state = state.to(device)
-        epsilon = 0.99
-        if random.random() < epsilon:
+        if self.epsilon >= EPS_END:
+            self.epsilon *= 0.995
+        if random.random() < self.epsilon:
             action = torch.tensor([[random.randrange(self.action_dim)]], device=device, dtype=torch.long)
         else:
             action = self.DQN(state).detach().max(1)[1].view(1, 1)
@@ -156,7 +162,7 @@ class Trainer():
         state = np.array(obs)
         state = state.transpose((2, 0, 1))
         state = torch.from_numpy(state)
-        return state.unsqueeze(0)  # 转化为四维的数据结构
+        return state.unsqueeze(0)
 
     def train(self):
         for episode in range(0, self.n_episode):
@@ -167,8 +173,6 @@ class Trainer():
             print('episode:', episode)
             for t in count():
                 action = self.agent.select_action(state)
-                if RENDER:
-                    self.env.render()
                 obs, reward, done, info = self.env.step(action)
                 episode_reward += reward
                 if not done:
@@ -194,10 +198,9 @@ class Trainer():
                     break
             print("reward = ", episode_reward)
             if episode % 20 == 0:
-                torch.save(self.agent.DQN.state_dict(),
-                           MODEL_STORE_PATH + '/' + "model/{}_episode{}.pt".format(modelname, episode))
-                print('Total steps: {} \t Episode: {}/{} \t Total reward: {}'.format(self.agent.stepdone, episode, t,
-                                                                                     episode_reward))
+                torch.save(self.agent.DQN.state_dict(), "model/{}_episode{}.pt".format(modelname, episode))
+                print('Total steps: {} \t Episode: {}/{} \t Total reward: {}'.format(self.agent.stepdone, episode,
+                                                                                     self.n_episode, episode_reward))
             self.rewardlist.append(episode_reward)
             self.env.close()
         return
