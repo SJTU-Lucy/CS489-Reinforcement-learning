@@ -137,7 +137,7 @@ class DQN():
 
 
 class Trainer():
-    def __init__(self, env, agent, n_episode):
+    def __init__(self, env, agent: DQN, n_episode):
         self.env = env
         self.n_episode = n_episode
         self.agent = agent
@@ -177,13 +177,13 @@ class Trainer():
                 if self.agent.stepdone > INITIAL_MEMORY:
                     self.agent.learn()
                     if self.agent.stepdone % TARGET_UPDATE == 0:
-                        self.agent.target_DQN.load_state_dict(self.agent.DQN.state_dict())
+                        self.agent.target_DQN.load_state_dict(self.agent.net.state_dict())
                 if done:
                     break
             print('Episode: {}/{} \t Total steps: {} \t Total reward: {}'
                   .format(episode, self.n_episode, self.agent.stepdone, episode_reward))
             if episode % 50 == 0:
-                torch.save(self.agent.DQN.state_dict(), "model/{}_episode_{}.pt".format(modelname, episode))
+                torch.save(self.agent.net.state_dict(), "model/{}_episode_{}.pt".format(modelname, episode))
             self.rewardlist.append(episode_reward)
             self.env.close()
         return
