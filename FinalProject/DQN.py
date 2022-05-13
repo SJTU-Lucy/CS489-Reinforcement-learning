@@ -158,7 +158,6 @@ class Trainer():
             for t in count():
                 action = self.agent.select_action(state)
                 obs, reward, done, info = self.env.step(action)
-                print(reward)
                 episode_reward += reward
                 if not done:
                     next_state = self.get_state(obs)
