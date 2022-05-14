@@ -2,13 +2,14 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
-import gym
 import random
 from collections import namedtuple
 from itertools import count
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+
+from wrapper import make_atari
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -20,6 +21,7 @@ EPS_START = 1
 EPS_END = 0.02
 EPS_DECAY = 1000000
 TARGET_UPDATE = 1000
+POLICY_UPDATE = 4
 lr = 1e-3
 INITIAL_MEMORY = 10000
 MEMORY_SIZE = 100000
@@ -27,7 +29,7 @@ n_episode = 2000
 
 MODEL_STORE_PATH = os.getcwd()
 modelname = 'DQN_Pong'
-madel_path = 'model/DQN_Pong_episode900.pt'
+model_path = 'model/DQN_Pong_episode_200.pt'
 
 
 class ReplayMemory(object):
@@ -70,7 +72,7 @@ class BasicConv2d(nn.Module):
 class Qnet(nn.Module):
     def __init__(self, in_channels=4, n_actions=14):
         super(Qnet, self).__init__()
-        # input of (1, 3, 210, 160)
+        # input size (1, 3, 210, 160)
         self.conv1 = BasicConv2d(in_channels, 32, kernel_size=(8, 8), stride=(4, 4))
         self.conv2 = BasicConv2d(32, 64, kernel_size=(4, 4), stride=(2, 2))
         self.conv3 = BasicConv2d(64, 64, kernel_size=(3, 3), stride=(2, 2))
@@ -86,14 +88,14 @@ class Qnet(nn.Module):
         return self.head(x)
 
 
-class DQN():
-    def __init__(self, in_channels=1, action_space=[], learning_rate=lr, memory_size=MEMORY_SIZE, epsilon=EPS_START):
+class DQN:
+    def __init__(self, in_channels, action_space, memory_size=MEMORY_SIZE, epsilon=EPS_START, pretrain=False):
         self.in_channels = in_channels
         self.action_space = action_space
         self.action_dim = self.action_space.n
         self.memory_buffer = ReplayMemory(memory_size)
         self.stepdone = 0
-        self.net = Qnet(self.in_channels, self.action_dim).cuda()
+        self.net = self.get_net(pretrain)
         self.target_DQN = Qnet(self.in_channels, self.action_dim).cuda()
         self.learning_rate = lr
         self.optimizer = optim.RMSprop(self.net.parameters(), lr=self.learning_rate, eps=0.001, alpha=0.95)
@@ -117,9 +119,8 @@ class DQN():
         batch = Transition(*zip(*transitions))
         actions = tuple((map(lambda a: torch.tensor([[a]], device='cuda'), batch.action)))
         rewards = tuple((map(lambda r: torch.tensor([r], device='cuda'), batch.reward)))
-        non_final_mask = torch.tensor(
-            tuple(map(lambda s: s is not None, batch.next_state)),
-            device=device, dtype=torch.uint8).bool()
+        non_final_mask = torch.tensor(tuple(map(lambda s: s is not None, batch.next_state)),
+                                      device=device, dtype=torch.uint8).bool()
         non_final_next_states = torch.cat([s for s in batch.next_state if s is not None]).to('cuda')
         state_batch = torch.cat(batch.state).to('cuda')
         action_batch = torch.cat(actions)
@@ -135,8 +136,17 @@ class DQN():
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
+    def get_net(self, pretrain):
+        if not pretrain:
+            return Qnet(self.in_channels, self.action_dim).cuda()
+        else:
+            net = Qnet(self.in_channels, self.action_dim)
+            net.load_state_dict(torch.load(model_path))
+            net = net.cuda()
+            return net
 
-class Trainer():
+
+class Trainer:
     def __init__(self, env, agent: DQN, n_episode):
         self.env = env
         self.n_episode = n_episode
@@ -165,16 +175,10 @@ class Trainer():
                     next_state = None
                 reward = torch.tensor([reward], device=device)
                 # 将四元组存到memory中
-                '''
-                state: batch_size channel h w    size: batch_size * 4
-                action: size: batch_size * 1
-                next_state: batch_size channel h w    size: batch_size * 4
-                reward: size: batch_size * 1                
-                '''
                 self.agent.memory_buffer.push(state, action.to('cpu'), next_state, reward.to('cpu'))
                 state = next_state
                 # 经验池满了之后开始学习
-                if self.agent.stepdone > INITIAL_MEMORY:
+                if self.agent.stepdone > INITIAL_MEMORY and self.agent.stepdone % POLICY_UPDATE == 0:
                     self.agent.learn()
                     if self.agent.stepdone % TARGET_UPDATE == 0:
                         self.agent.target_DQN.load_state_dict(self.agent.net.state_dict())
@@ -197,17 +201,10 @@ class Trainer():
 
 
 if __name__ == '__main__':
-    # create environment
-    env = gym.make("PongNoFrameskip-v4")
+    env = make_atari("PongNoFrameskip-v4", max_episode_steps=10000)
     action_space = env.action_space
     state_channel = env.observation_space.shape[2]
     agent = DQN(in_channels=state_channel, action_space=action_space)
     trainer = Trainer(env, agent, n_episode)
     trainer.train()
     trainer.plot_reward()
-
-
-
-
-
-
