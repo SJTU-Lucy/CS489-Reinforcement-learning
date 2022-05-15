@@ -63,7 +63,7 @@ class BasicConv2d(nn.Module):
 
 
 class Qnet(nn.Module):
-    def __init__(self, in_channels=4, n_actions=14):
+    def __init__(self, in_channels, n_actions):
         super(Qnet, self).__init__()
         # input of (1, 3, 210, 160)
         self.conv1 = BasicConv2d(in_channels, 32, kernel_size=(8, 8), stride=(4, 4))
