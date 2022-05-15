@@ -81,7 +81,7 @@ class Qnet(nn.Module):
         return self.head(x)
 
 
-class DQN:
+class DQNAgent:
     def __init__(self, in_channels, action_space, memory_size=MEMORY_SIZE, epsilon=EPS_START):
         self.in_channels = in_channels
         self.action_space = action_space
@@ -132,7 +132,7 @@ class DQN:
 
 
 class Trainer:
-    def __init__(self, env, agent: DQN, n_episode):
+    def __init__(self, env, agent: DQNAgent, n_episode):
         self.env = env
         self.n_episode = n_episode
         self.agent = agent
@@ -190,7 +190,7 @@ def train_pong():
     env = make_atari("PongNoFrameskip-v4", max_episode_steps=10000)
     action_space = env.action_space
     state_channel = env.observation_space.shape[2]
-    agent = DQN(in_channels=state_channel, action_space=action_space)
+    agent = DQNAgent(in_channels=state_channel, action_space=action_space)
     trainer = Trainer(env, agent, n_episode)
     trainer.train()
     trainer.plot_reward()

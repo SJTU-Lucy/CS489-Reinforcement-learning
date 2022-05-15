@@ -1,17 +1,57 @@
+import gym
+from collections import deque
+import torch.nn as nn
 import numpy as np
 import torch
 import torch.optim as optim
-from PPO.models import Actor, Critic
+import matplotlib.pyplot as plt
 
-GAMMA = 0.99
-LAMDA = 0.95
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+GAMMA = 0.98
+LAMBDA = 0.98
 BATCH_SIZE = 64
 actor_lr = 0.0003
 critic_lr = 0.0003
 l2_rate = 0.001
 CLIP_EPISILON = 0.2
+MAX_STEPS = 3e6
+UPDATE_STEPS = 2048
+n_episode = 5000
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+class Actor(nn.Module):
+    def __init__(self, state_size, action_size):
+        super(Actor, self).__init__()
+        self.fc1 = nn.Linear(state_size, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.mu = nn.Linear(64, action_size)
+        self.sigma = nn.Linear(64, action_size)
+        self.mu.weight.data.mul_(0.1)
+        self.mu.bias.data.mul_(0.0)
+
+    def forward(self, x):
+        x = torch.tanh(self.fc1(x))
+        x = torch.tanh(self.fc2(x))
+        mu = self.mu(x)
+        log_sigma = self.sigma(x)
+        sigma = torch.exp(log_sigma)
+        return mu, sigma, log_sigma
+
+
+class Critic(nn.Module):
+    def __init__(self, state_size):
+        super(Critic, self).__init__()
+        self.fc1 = nn.Linear(state_size, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 1)
+        self.fc3.weight.data.mul_(0.1)
+        self.fc3.bias.data.mul_(0.0)
+
+    def forward(self, x):
+        x = torch.tanh(self.fc1(x))
+        x = torch.tanh(self.fc2(x))
+        v = self.fc3(x)
+        return v
 
 
 def get_gae(rewards, masks, values):
@@ -25,7 +65,7 @@ def get_gae(rewards, masks, values):
     for t in reversed(range(0, len(rewards))):
         running_returns = rewards[t] + GAMMA * running_returns * masks[t]
         running_tderror = rewards[t] + GAMMA * previous_value * masks[t] - values.data[t]
-        running_advants = running_tderror + GAMMA * LAMDA * running_advants * masks[t]
+        running_advants = running_tderror + GAMMA * LAMBDA * running_advants * masks[t]
 
         returns[t] = running_returns
         previous_value = values.data[t]
@@ -41,7 +81,7 @@ def get_action(mu, sigma):
     return action
 
 
-class PpoAgent:
+class PPOAgent:
     def __init__(self, state_size, action_size):
         self.actor = Actor(state_size, action_size).to(device)
         self.critic = Critic(state_size).to(device)
@@ -53,7 +93,6 @@ class PpoAgent:
         pi = torch.distributions.Normal(mu, sigma)
         new_policy = pi.log_prob(actions).sum(1, keepdim=True)
         old_policy = old_policy[index]
-
         ratio = torch.exp(new_policy - old_policy)
         surrogate = ratio * advants
         return surrogate, ratio
@@ -66,8 +105,6 @@ class PpoAgent:
         masks = torch.Tensor(list(memory[:, 3])).to(device)
         values = self.critic(states)
 
-        # ----------------------------
-        # step 1: get returns and GAEs and log probability of old policy
         returns, advants = get_gae(rewards, masks, values)
         mu, sigma, log_sigma = self.actor(states)
 
@@ -77,9 +114,6 @@ class PpoAgent:
         criterion = torch.nn.MSELoss()
         n = len(states)
         arr = np.arange(n)
-
-        # ----------------------------
-        # step 2: get value loss and actor loss and update actor & critic
         for epoch in range(10):
             np.random.shuffle(arr)
 
@@ -107,3 +141,52 @@ class PpoAgent:
                 self.actor_optim.zero_grad()
                 actor_loss.backward()
                 self.actor_optim.step()
+
+
+class Trainer:
+    def __init__(self, env, agent: PPOAgent):
+        self.env = env
+        self.agent = agent
+        self.rewardlist = []
+
+    def train(self):
+        steps = 0
+        memory = deque()
+        for episode in range(1, n_episode + 1):
+            state = self.env.reset()
+            reward_sum = 0
+            for __ in range(10000):
+                steps += 1
+                mu, std, _ = self.agent.actor(torch.Tensor(state).unsqueeze(0).to(device))
+                action = get_action(mu, std)[0]
+                next_state, reward, done, _ = self.env.step(action)
+                memory.append([state, action, reward, 1 - done])
+                reward_sum += reward
+                state = next_state
+                if steps % UPDATE_STEPS == 0:
+                    self.agent.train(memory)
+                    memory.clear()
+                if done:
+                    break
+            self.rewardlist.append(reward_sum)
+            print('Episode: {}/{} \t Total reward: {}'.format(episode, n_episode, reward_sum))
+            if episode % 500 == 0:
+                torch.save({'actor': self.agent.actor.state_dict(), 'critic': self.agent.critic.state_dict()},
+                           "PPO/model/PPO_Ant_{}.pt".format(episode))
+
+    def plot_reward(self):
+        plt.plot(self.rewardlist)
+        plt.xlabel("episode")
+        plt.ylabel("episode_reward")
+        plt.title('train_reward')
+        plt.show()
+
+
+def train_ppo():
+    env = gym.make('Ant-v2')
+    state_size = env.observation_space.shape[0]
+    action_size = env.action_space.shape[0]
+    agent = PPOAgent(state_size=state_size, action_size=action_size)
+    trainer = Trainer(env, agent)
+    trainer.train()
+    trainer.plot_reward()

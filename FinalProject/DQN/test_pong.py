@@ -1,7 +1,7 @@
 import time
 import torch
 import numpy as np
-from DQN.train_pong import DQN
+from DQN.train_pong import DQNAgent
 from DQN.wrapper import make_atari
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -17,7 +17,7 @@ def get_state(obs):
 def test_pong():
     model_path = 'DQN/model/DQN_Pong_best.pt'
     env = make_atari("PongNoFrameskip-v4", max_episode_steps=10000)
-    agent = DQN(in_channels=env.observation_space.shape[2], action_space=env.action_space)
+    agent = DQNAgent(in_channels=env.observation_space.shape[2], action_space=env.action_space)
     agent.net.load_state_dict(torch.load(model_path))
     obs = env.reset()
     state = get_state(obs)
