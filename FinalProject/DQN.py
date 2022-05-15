@@ -21,15 +21,15 @@ EPS_START = 1
 EPS_END = 0.02
 EPS_DECAY = 1000000
 TARGET_UPDATE = 1000
-POLICY_UPDATE = 4
+POLICY_UPDATE = 2
 lr = 1e-3
 INITIAL_MEMORY = 10000
 MEMORY_SIZE = 100000
-n_episode = 2000
+n_episode = 1000
 
 MODEL_STORE_PATH = os.getcwd()
 modelname = 'DQN_Pong'
-model_path = 'model/DQN_Pong_episode_200.pt'
+madel_path = 'model/DQN_Pong_episode_200.pt'
 
 
 class ReplayMemory(object):
@@ -72,7 +72,7 @@ class BasicConv2d(nn.Module):
 class Qnet(nn.Module):
     def __init__(self, in_channels=4, n_actions=14):
         super(Qnet, self).__init__()
-        # input size (1, 3, 210, 160)
+        # input of (1, 3, 210, 160)
         self.conv1 = BasicConv2d(in_channels, 32, kernel_size=(8, 8), stride=(4, 4))
         self.conv2 = BasicConv2d(32, 64, kernel_size=(4, 4), stride=(2, 2))
         self.conv3 = BasicConv2d(64, 64, kernel_size=(3, 3), stride=(2, 2))
@@ -88,14 +88,14 @@ class Qnet(nn.Module):
         return self.head(x)
 
 
-class DQN:
-    def __init__(self, in_channels, action_space, memory_size=MEMORY_SIZE, epsilon=EPS_START, pretrain=False):
+class DQN():
+    def __init__(self, in_channels, action_space, memory_size=MEMORY_SIZE, epsilon=EPS_START):
         self.in_channels = in_channels
         self.action_space = action_space
         self.action_dim = self.action_space.n
         self.memory_buffer = ReplayMemory(memory_size)
         self.stepdone = 0
-        self.net = self.get_net(pretrain)
+        self.net = Qnet(self.in_channels, self.action_dim).cuda()
         self.target_DQN = Qnet(self.in_channels, self.action_dim).cuda()
         self.learning_rate = lr
         self.optimizer = optim.RMSprop(self.net.parameters(), lr=self.learning_rate, eps=0.001, alpha=0.95)
@@ -119,8 +119,9 @@ class DQN:
         batch = Transition(*zip(*transitions))
         actions = tuple((map(lambda a: torch.tensor([[a]], device='cuda'), batch.action)))
         rewards = tuple((map(lambda r: torch.tensor([r], device='cuda'), batch.reward)))
-        non_final_mask = torch.tensor(tuple(map(lambda s: s is not None, batch.next_state)),
-                                      device=device, dtype=torch.uint8).bool()
+        non_final_mask = torch.tensor(
+            tuple(map(lambda s: s is not None, batch.next_state)),
+            device=device, dtype=torch.uint8).bool()
         non_final_next_states = torch.cat([s for s in batch.next_state if s is not None]).to('cuda')
         state_batch = torch.cat(batch.state).to('cuda')
         action_batch = torch.cat(actions)
@@ -136,17 +137,8 @@ class DQN:
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
-    def get_net(self, pretrain):
-        if not pretrain:
-            return Qnet(self.in_channels, self.action_dim).cuda()
-        else:
-            net = Qnet(self.in_channels, self.action_dim)
-            net.load_state_dict(torch.load(model_path))
-            net = net.cuda()
-            return net
 
-
-class Trainer:
+class Trainer():
     def __init__(self, env, agent: DQN, n_episode):
         self.env = env
         self.n_episode = n_episode
@@ -201,6 +193,7 @@ class Trainer:
 
 
 if __name__ == '__main__':
+    # create environment
     env = make_atari("PongNoFrameskip-v4", max_episode_steps=10000)
     action_space = env.action_space
     state_channel = env.observation_space.shape[2]
