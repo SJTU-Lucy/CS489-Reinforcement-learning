@@ -7,16 +7,15 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-GAMMA = 0.98
-LAMBDA = 0.98
+GAMMA = 0.99
+LAMBDA = 0.95
 BATCH_SIZE = 64
 actor_lr = 0.0003
 critic_lr = 0.0003
 l2_rate = 0.001
 CLIP_EPISILON = 0.2
-MAX_STEPS = 3e6
+MAX_STEPS = 3e5
 UPDATE_STEPS = 2048
-n_episode = 5000
 
 
 class Actor(nn.Module):
@@ -151,11 +150,12 @@ class Trainer:
 
     def train(self):
         steps = 0
+        episode = 0
         memory = deque()
-        for episode in range(1, n_episode + 1):
+        while steps < MAX_STEPS:
             state = self.env.reset()
             reward_sum = 0
-            for __ in range(10000):
+            for __ in range(3000):
                 steps += 1
                 mu, std, _ = self.agent.actor(torch.Tensor(state).unsqueeze(0).to(device))
                 action = get_action(mu, std)[0]
@@ -168,8 +168,9 @@ class Trainer:
                     memory.clear()
                 if done:
                     break
+            episode += 1
             self.rewardlist.append(reward_sum)
-            print('Episode: {}/{} \t Total reward: {}'.format(episode, n_episode, reward_sum))
+            print('Episode: {} \t step: {}/{} \t Total reward: {}'.format(episode, steps, MAX_STEPS, reward_sum))
             if episode % 500 == 0:
                 torch.save({'actor': self.agent.actor.state_dict(), 'critic': self.agent.critic.state_dict()},
                            "PPO/model/PPO_Ant_{}.pt".format(episode))
