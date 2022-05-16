@@ -13,7 +13,7 @@ def test_ppo(n_episodes=100, model_path=None, render=True):
     actor = Actor(input_size, action_size)
     critic = Critic(input_size)
 
-    model_path = 'PPO/model/PPO_Ant_500.pt'
+    model_path = 'PPO/model/PPO_Ant_9000.pt'
     pretrained_model = torch.load(model_path)
     actor.load_state_dict(pretrained_model['actor'])
     critic.load_state_dict(pretrained_model['critic'])

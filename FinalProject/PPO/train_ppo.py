@@ -14,7 +14,6 @@ actor_lr = 0.0003
 critic_lr = 0.0003
 l2_rate = 0.001
 CLIP_EPISILON = 0.2
-MAX_STEPS = 3e5
 UPDATE_STEPS = 2048
 
 
@@ -87,15 +86,6 @@ class PPOAgent:
         self.actor_optim = optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optim = optim.Adam(self.critic.parameters(), lr=critic_lr, weight_decay=l2_rate)
 
-    def surrogate_loss(self, advants, states, old_policy, actions, index):
-        mu, sigma, log_sigma = self.actor(states)
-        pi = torch.distributions.Normal(mu, sigma)
-        new_policy = pi.log_prob(actions).sum(1, keepdim=True)
-        old_policy = old_policy[index]
-        ratio = torch.exp(new_policy - old_policy)
-        surrogate = ratio * advants
-        return surrogate, ratio
-
     def train(self, memory):
         memory = np.array(memory)
         states = torch.Tensor(np.vstack(memory[:, 0])).to(device)
@@ -126,10 +116,10 @@ class PPOAgent:
                 new_prob = pi.log_prob(b_actions).sum(1, keepdim=True)
                 old_prob = old_log_prob[b_index].detach()
                 ratio = torch.exp(new_prob-old_prob)
+
                 surrogate_loss = ratio * b_advants
                 values = self.critic(b_states)
                 critic_loss = criterion(values, b_returns)
-
                 self.critic_optim.zero_grad()
                 critic_loss.backward()
                 self.critic_optim.step()
@@ -137,7 +127,6 @@ class PPOAgent:
                 ratio = torch.clamp(ratio, 1.0 - CLIP_EPISILON, 1.0 + CLIP_EPISILON)
                 clipped_loss = ratio * b_advants
                 actor_loss = -torch.min(surrogate_loss, clipped_loss).mean()
-
                 self.actor_optim.zero_grad()
                 actor_loss.backward()
                 self.actor_optim.step()
@@ -178,7 +167,7 @@ class Trainer:
 
     def train(self):
         episodes = 0
-        for iter in range(15000):
+        for iter in range(3000):
             memory = deque()
             scores = []
             steps = 0
@@ -200,7 +189,7 @@ class Trainer:
                 episodes += 1
                 scores.append(score)
                 self.rewardlist.append(score)
-                if episodes % 500 == 0:
+                if episodes % 1000 == 0:
                     torch.save({'actor': self.agent.actor.state_dict(), 'critic': self.agent.critic.state_dict(),
                                 'norm': [self.normalize.mean, self.normalize.std, self.normalize.stdd, self.normalize.n]},
                                "PPO/model/PPO_Ant_{}.pt".format(episodes))
