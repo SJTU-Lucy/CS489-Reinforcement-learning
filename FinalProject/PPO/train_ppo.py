@@ -97,7 +97,7 @@ class PPOAgent:
         return surrogate, ratio
 
     def train(self, memory):
-        memory = np.array(memory, dtype=object)
+        memory = np.array(memory)
         states = torch.Tensor(np.vstack(memory[:, 0])).to(device)
         actions = torch.Tensor(list(memory[:, 1])).to(device)
         rewards = torch.Tensor(list(memory[:, 2])).to(device)
@@ -105,75 +105,108 @@ class PPOAgent:
         values = self.critic(states)
 
         returns, advants = get_gae(rewards, masks, values)
-        mu, sigma, log_sigma = self.actor(states)
-
-        pi = torch.distributions.Normal(mu, sigma)
-        old_policy = pi.log_prob(actions).sum(1, keepdim=True)
+        old_mu, old_std, old_log_std = self.actor(states)
+        pi = torch.distributions.Normal(old_mu, old_std)
+        old_log_prob = pi.log_prob(actions).sum(1, keepdim=True)
 
         criterion = torch.nn.MSELoss()
         n = len(states)
         arr = np.arange(n)
-        for epoch in range(10):
+        for epoch in range(1):
             np.random.shuffle(arr)
+            for i in range(n//BATCH_SIZE):
+                b_index = arr[BATCH_SIZE*i:BATCH_SIZE*(i+1)]
+                b_states = states[b_index]
+                b_advants = advants[b_index].unsqueeze(1)
+                b_actions = actions[b_index]
+                b_returns = returns[b_index].unsqueeze(1)
 
-            for i in range(n // BATCH_SIZE):
-                batch_index = arr[BATCH_SIZE * i: BATCH_SIZE * (i + 1)]  # batch_size * state_size
-                inputs = states[batch_index]
-                returns_samples = returns.unsqueeze(1)[batch_index]  # batch_size * 1
-                advants_samples = advants.unsqueeze(1)[batch_index]  # batch_size * 1
-                actions_samples = actions[batch_index]  # batch_size * action_size
-
-                loss, ratio = self.surrogate_loss(advants_samples, inputs,
-                                                  old_policy.detach(), actions_samples, batch_index)
-
-                values = self.critic(inputs)
-                critic_loss = criterion(values, returns_samples)
+                mu, std, log_std = self.actor(b_states)
+                pi = torch.distributions.Normal(mu, std)
+                new_prob = pi.log_prob(b_actions).sum(1, keepdim=True)
+                old_prob = old_log_prob[b_index].detach()
+                ratio = torch.exp(new_prob-old_prob)
+                surrogate_loss = ratio * b_advants
+                values = self.critic(b_states)
+                critic_loss = criterion(values, b_returns)
 
                 self.critic_optim.zero_grad()
                 critic_loss.backward()
                 self.critic_optim.step()
 
-                clipped_ratio = torch.clamp(ratio, 1.0 - CLIP_EPISILON, 1.0 + CLIP_EPISILON)
-                clipped_loss = clipped_ratio * advants_samples
-                actor_loss = -torch.min(loss, clipped_loss).mean()
+                ratio = torch.clamp(ratio, 1.0 - CLIP_EPISILON, 1.0 + CLIP_EPISILON)
+                clipped_loss = ratio * b_advants
+                actor_loss = -torch.min(surrogate_loss, clipped_loss).mean()
 
                 self.actor_optim.zero_grad()
                 actor_loss.backward()
                 self.actor_optim.step()
 
 
+class Normalize:
+    def __init__(self, state_size):
+        self.mean = np.zeros((state_size,))
+        self.std = np.zeros((state_size, ))
+        self.stdd = np.zeros((state_size, ))
+        self.n = 0
+
+    def __call__(self, x):
+        x = np.asarray(x)
+        self.n += 1
+        if self.n == 1:
+            self.mean = x
+        else:
+            old_mean = self.mean.copy()
+            self.mean = old_mean + (x - old_mean) / self.n
+            self.stdd = self.stdd + (x - old_mean) * (x - self.mean)
+        if self.n > 1:
+            self.std = np.sqrt(self.stdd / (self.n - 1))
+        else:
+            self.std = self.mean
+        x = x - self.mean
+        x = x / (self.std + 1e-8)
+        x = np.clip(x, -5, +5)
+        return x
+
+
 class Trainer:
-    def __init__(self, env, agent: PPOAgent):
+    def __init__(self, env, agent: PPOAgent, normal: Normalize):
         self.env = env
         self.agent = agent
         self.rewardlist = []
+        self.normalize = normal
 
     def train(self):
-        steps = 0
-        episode = 0
-        memory = deque()
-        while steps < MAX_STEPS:
-            state = self.env.reset()
-            reward_sum = 0
-            for __ in range(3000):
-                steps += 1
-                mu, std, _ = self.agent.actor(torch.Tensor(state).unsqueeze(0).to(device))
-                action = get_action(mu, std)[0]
-                next_state, reward, done, _ = self.env.step(action)
-                memory.append([state, action, reward, 1 - done])
-                reward_sum += reward
-                state = next_state
-                if steps % UPDATE_STEPS == 0:
-                    self.agent.train(memory)
-                    memory.clear()
-                if done:
-                    break
-            episode += 1
-            self.rewardlist.append(reward_sum)
-            print('Episode: {} \t step: {}/{} \t Total reward: {}'.format(episode, steps, MAX_STEPS, reward_sum))
-            if episode % 500 == 0:
-                torch.save({'actor': self.agent.actor.state_dict(), 'critic': self.agent.critic.state_dict()},
-                           "PPO/model/PPO_Ant_{}.pt".format(episode))
+        episodes = 0
+        for iter in range(15000):
+            memory = deque()
+            scores = []
+            steps = 0
+            while steps < 2048:
+                state = self.normalize(self.env.reset())
+                score = 0
+                for _ in range(10000):
+                    steps += 1
+                    mu, std, _ = self.agent.actor(torch.Tensor(state).unsqueeze(0).to(device))
+                    action = get_action(mu, std)[0]
+                    next_state, reward, done, _ = self.env.step(action)
+                    next_state = self.normalize(next_state)
+                    mask = (1 - done) * 1
+                    memory.append([state, action, reward, mask])
+                    score += reward
+                    state = next_state
+                    if done:
+                        break
+                episodes += 1
+                scores.append(score)
+                self.rewardlist.append(score)
+                if episodes % 500 == 0:
+                    torch.save({'actor': self.agent.actor.state_dict(), 'critic': self.agent.critic.state_dict(),
+                                'norm': [self.normalize.mean, self.normalize.std, self.normalize.stdd, self.normalize.n]},
+                               "PPO/model/PPO_Ant_{}.pt".format(episodes))
+            score_avg = np.mean(scores)
+            print('{} episode score is {}'.format(episodes, score_avg))
+            self.agent.train(memory)
 
     def plot_reward(self):
         plt.plot(self.rewardlist)
@@ -188,6 +221,7 @@ def train_ppo():
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.shape[0]
     agent = PPOAgent(state_size=state_size, action_size=action_size)
-    trainer = Trainer(env, agent)
+    normalize = Normalize(state_size=state_size)
+    trainer = Trainer(env, agent, normalize)
     trainer.train()
     trainer.plot_reward()
