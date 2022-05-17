@@ -20,6 +20,6 @@ if args.env_name == 'PongNoFrameskip-v4':
 elif args.env_name == 'Ant-v2':
     print('Environment: ' + args.env_name + ' Method: PPO')
     if args.action == 'test':
-        test_ppo(render=False)
+        test_ppo(render=True)
     elif args.action == 'train':
         train_ppo()
