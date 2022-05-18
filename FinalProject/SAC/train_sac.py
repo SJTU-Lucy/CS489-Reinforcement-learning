@@ -260,7 +260,7 @@ class SACAgent(nn.Module):
         else:
             self.load_state_dict(torch.load(path))
 
-    def train(self, max_episode_num=1000, max_time=1000):
+    def train(self, max_episode_num=10000, max_time=5000):
         self.my_print('######################### Start train #########################')
         self.episode_rewards = []
         self.critic_loss_list = []
