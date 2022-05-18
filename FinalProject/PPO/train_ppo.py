@@ -192,7 +192,7 @@ class Trainer:
                 if episodes % 1000 == 0:
                     torch.save({'actor': self.agent.actor.state_dict(), 'critic': self.agent.critic.state_dict(),
                                 'norm': [self.normalize.mean, self.normalize.std, self.normalize.stdd, self.normalize.n]},
-                               "PPO/model/PPO_Ant_{}.pt".format(episodes))
+                               "model/PPO_Ant_{}.pt".format(episodes))
             score_avg = np.mean(scores)
             print('{} episode score is {}'.format(episodes, score_avg))
             self.agent.train(memory)

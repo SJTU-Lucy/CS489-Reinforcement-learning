@@ -1,47 +1,25 @@
 import gym
-import time
 import numpy as np
-from tqdm import tqdm
-from SAC.sac import SAC
+import torch
+from SAC.train_sac import SACAgent
 
 
-def test_sac(env_name, n_episodes=100, model_path=None, render=False):
-    if model_path is None:
-        model_path = 'trained_models/' + env_name + '_model.pth.tar'
-
-    env = gym.make(env_name)
-    input_size = env.observation_space.shape[0]
-    action_space = env.action_space
-
-    agent = SAC(input_size, action_space)
-    agent.load_model(model_path)
-    agent.policy.eval()
-    agent.critic.eval()
-    agent.critic_target.eval()
-
-    reward_list = []
-    for i_episode in tqdm(range(n_episodes)):
+def test_sac(n_episodes=100, model_path=None, render=False):
+    env = gym.make('Ant-v2')
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    agent = SACAgent(env, device)
+    agent.load_model(agent.save_model_path + 'SAC_Ant_1000000.pth')
+    num_test = 5
+    episode_rewards = []
+    for _ in range(num_test):
         state = env.reset()
-        reward_sum = 0
-
-        while True:
-            if render:
-                env.render()
-                time.sleep(0.02)
-
-            action = agent.select_action(state, evaluate=True)
-
-            next_state, reward, done, _ = env.step(action)
-            state = next_state
-            reward_sum += reward
-
+        episode_reward = 0.
+        for _ in range(10000):
+            action = agent.actor.get_action(torch.tensor([state]).to(device).float(), stochastic=False)
+            env.render()
+            state, reward, done, _ = env.step(action)
+            episode_reward += reward
             if done:
                 break
-
-        reward_list.append(reward_sum)
-
-    env.close()
-    reward_list = np.array(reward_list)
-    avg_r = np.mean(reward_list)
-    std_r = np.std(reward_list)
-    print("Reward sum avg: ", avg_r, "std: ", std_r)
+        episode_rewards.append(episode_reward)
+    print('avg_episode_reward : ', np.mean(episode_rewards))
