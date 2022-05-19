@@ -1,5 +1,4 @@
 ######################### Start train #########################
-######################### Start train #########################
 Tot_step: 4435   	 | Episode: 20   	 | Time: 234.50 	 | Reward : -81.836 	 | actor_loss : -234.422 	 | critic_loss : 748.261
 Tot_step: 7377   	 | Episode: 40   	 | Time: 147.10 	 | Reward : -49.842 	 | actor_loss : -984.494 	 | critic_loss : 9847.296
 Tot_step: 9780   	 | Episode: 60   	 | Time: 120.15 	 | Reward : -38.760 	 | actor_loss : -2712.073 	 | critic_loss : 73547.061
